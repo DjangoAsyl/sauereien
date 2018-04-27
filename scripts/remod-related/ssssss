@@ -1,0 +1,240 @@
+#!/bin/bash
+#
+# ==============================================
+# Star's Sublime Sauerbraten Server Start Script
+# ^      ^       ^           ^      ^     ^
+# ==============================================
+# 
+# Version: v0.1
+# Author: DjangoAsyL
+# --------
+#
+# Install:
+# ======== 
+# To use this script, please configure the necessary values below, copy your server-init.cfg
+# to the config dir and rename it to: {servername}-init.cfg
+#
+# TODO:
+# =====
+# - Make a setup option
+# - Run servers with auto restart option
+# - Error checking & handling for restart()
+
+ 
+# Config. Don't use trailing slash!
+# 
+remod_conf_dir="/opt/sauer/remod-conf"
+remod_src_dir="/opt/sauer/remod-sauerbraten"
+proc="remod64"
+
+# Usage
+#
+function usage () {
+	cat <<EOF
+
+Usage: $0 [options] [action]
+
+Options:
+  -h, --help    Print this message.
+  -v, --verbose Print more infos.
+  -s, --server  The sauerbraten server to be queried.
+  -a, --all     All servers within config-dir. (overrules --server option)
+ 
+Actions: 
+  One of the following actions determine what should happen to the server.
+  They are mandatory and can only be the last argument.
+
+  status | start | stop | restart
+
+EOF
+exit 1
+}
+
+# Get the process id.
+# 
+function getpid () {
+	if [ -e "${remod_conf_dir}/"$1".pid" ]; then
+		pid=$(cat "${remod_conf_dir}/"$1".pid" )
+		echo $pid
+	fi
+}
+
+# Check if the server is running.
+# 
+function status () {
+	local server=$1
+	local pid=$(getpid ${server})
+
+	if [ -n "$pid" ]; then
+		ghostcheck=$(ps -p ${pid} -o cmd --no-headers | grep ${proc})
+		if [ -n "$ghostcheck" ]; then
+			echo "[!] "$server" is running. PID: "$pid" cmd: "$ghostcheck
+		else 
+			echo "[X] "$server".pid found, but it is not running."
+			echo "[!] Removing pid file."
+			rm ${remod_conf_dir}"/"$server".pid"
+		fi
+	else
+		[[ -n $verbose ]] && echo "[v] Could not read the pid for "$1
+		echo -e "[!] Server "$server" not running."
+	fi
+}
+
+# Start the server.
+# 
+function start () {
+	local server=$1
+	local pid=$(getpid ${server})
+	
+	# Build the start command
+	local cmd="./${proc} -d -f${remod_conf_dir}/"$server"-init.cfg -p${remod_conf_dir}/"$server".pid"
+
+	if [ -z "$pid" ]; then
+		[[ -n $verbose ]] && echo "Starting "$server
+		pushd $remod_src_dir
+		eval $cmd
+		popd
+	else
+		echo "[X] Server "$server" is already running."
+		[[ -n $verbose ]] && echo "[v] If this is unexpected, consider removing the "$server".pid file."
+	fi
+}
+
+# Stop the server.
+# 
+function stop () {
+	local server=$1
+	local pid=$(getpid ${server})
+
+	if [ -n "$pid" ]; then
+		[[ -n $verbose ]] && echo "Stopping "$server
+		kill -9 $pid
+		rm ${remod_conf_dir}"/"$server".pid"
+	else
+		[[ -n $verbose ]] && echo "[v] Could not read "$server".pid"
+		echo "[X] "$server" is not running."
+	fi
+}
+
+# Start 'n' stop.
+# 
+function restart () {
+	local server=$1
+
+	stop $server;
+	sleep 1;
+	start $server;
+	echo "[!] Restarted "$server
+}
+
+# Scan the config dir for '-init.cfg' files and start em all.
+# 
+function all () {
+	local action=$1
+	# all=$(ls "${remod_conf_dir}"/*-init.cfg | awk -F "/" '{print $(NF)}' | awk -F "-" '{print $1}')
+	for s in "${remod_conf_dir}"/*-init.cfg
+	do 
+		serv=$(echo $s | awk -F "/" '{print $(NF)}' | awk -F "-" '{print $1}')
+		eval $0 -s $serv $action 
+	done
+}
+
+# Script core.
+# 
+all=false
+verbose=""
+while [[ "$#" -gt 0 ]]; do
+	key="$1"
+
+	case $key in
+
+		-h|--help)
+		usage;
+		;;
+	
+		-v|--verbose)
+		verbose=true
+		;;
+
+		-s|--server)
+		server="$2"
+		shift
+		;;
+
+		-a|--all)
+		all=true
+		;;
+
+		status|start|restart|stop)
+		action=$key
+		break
+		;;
+
+		*)
+		usage;
+		;;
+	esac
+	shift 
+done
+
+# Exit if there was no action provided.
+# 
+if [[ -n $verbose ]]; then 
+	echo "[v] Verbose output is enabled."
+fi
+
+# Exit if there was no action provided.
+# 
+if [[ -z $action ]]; then 
+	echo "[X] Error: Don't know what to do, really."
+	usage;
+	exit 1
+fi
+
+# Exit if there was no server provided.
+# 
+if [[ -z $server ]] && [[ $all == false ]]; then 
+	echo "[X] Error: Which server should I do what to? Naw man."
+	usage;
+	exit 1
+fi
+
+# Act on all -inits within config-dir
+#
+if [ $all == true ]; then
+	all $action
+	exit 0;
+fi
+
+# Check if the config exists.
+#
+if [ ! -e "${remod_conf_dir}/${server}-init.cfg" ]; then
+	echo "[X] Error: No config found: ${remod_conf_dir}/${server}-init.cfg"
+	exit 1
+fi
+
+
+# Do stuff.
+# 
+case $action in 
+
+	status)
+	status $server;
+	;;
+
+	start)
+	start $server
+	;;
+	
+	stop)
+	stop $server
+	;;
+
+	restart)
+	restart $server
+	;;
+
+esac
+
+# Stop doing stuff.
+exit 0;
